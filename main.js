@@ -1,8 +1,15 @@
 const { Client: ClientClass, GatewayIntentBits } = require("discord.js");
 
+/*
 const NewLimitedPing = "@everyone";
 const UptimePing = "@everyone";
 const DowntimePing = "@everyone";
+*/
+
+const NewLimitedPing = "<@1370426338007060656>";
+const UptimePing = "<@1370426338007060656>";
+const DowntimePing = "<@1370426338007060656>";
+
 const PingCount = 5;
 
 const ConsecutiveNot500 = 4;
@@ -16,7 +23,6 @@ let LimitedItems = [];
 let Items = [];
 
 let UptimePingTime = 0;
-let DowntimePingTime = 0;
 let UptimeCount = 0;
 let VortexDown = false;
 
@@ -71,7 +77,6 @@ async function HandleVortexUp(Channel, Response) {
 
   UptimeCount = 0;
   UptimePingTime = 0;
-  DowntimePingTime = 0;
   VortexDown = false;
 
   console.log("[Ktb] Vortex is UP");
@@ -93,21 +98,27 @@ async function HandleVortexDown(Channel, Response) {
 
 async function HandleItems(NewLimitedChannel, NewItemChannel, CatalogData) {
   for (const Item of CatalogData.items) {
-    if (Item.limited == true && !LimitedItems.includes(Item.id)) {
+    const ItemId = String(Item.id);
+
+    if (Items.includes(ItemId)) {
+      continue;
+    }
+
+    if (Item.limited == true) {
       console.log(`[Ktb] New limited item: ${Item.name} (${Item.id})`);
 
       for (let PingTime = 0; PingTime < PingCount; PingTime++) {
         await SendItemMessage(NewLimitedChannel, NewItemChannel, Item);
       }
 
-      LimitedItems.push(Item.id);
-    } else if (!Items.includes(Item.id)) {
+      LimitedItems.push(ItemId);
+    } else {
       console.log(`[Ktb] New item: ${Item.name} (${Item.id})`);
 
       await SendItemMessage(NewLimitedChannel, NewItemChannel, Item);
-
-      Items.push(Item.id);
     }
+
+    Items.push(ItemId);
   }
 }
 
@@ -142,21 +153,14 @@ async function CheckVortex(
     console.log(`[Ktb] Vortex request failed: ${Error.message}`);
 
     if (!VortexDown) {
-      DowntimePingTime = 0;
+      VortexDown = true;
       UptimePingTime = 0;
-      console.log(`[Ktb] Vortex is DOWN`);
-    }
-
-    VortexDown = true;
-
-    if (DowntimePingTime < PingCount) {
-      DowntimePingTime++;
 
       await VortexUptimeChannel.send(
         `${DowntimePing} [Vortex](https://playvortex.io) is DOWN\nRequest failed: ${Error.message}`,
       );
 
-      console.log(`[Ktb] Downtime ping: ${DowntimePingTime}/${PingCount}`);
+      console.log(`[Ktb] Vortex is DOWN`);
     }
   }
 }
@@ -182,7 +186,13 @@ Client.once("clientReady", async () => {
     const CatalogData = await Response.json();
 
     for (const Item of CatalogData.items) {
-      (Item.limited ? LimitedItems : Items).push(Item.id);
+      const ItemId = String(Item.id);
+
+      Items.push(ItemId);
+
+      if (Item.limited) {
+        LimitedItems.push(ItemId);
+      }
     }
   } else {
     await HandleVortexDown(VortexUptimeChannel, Response);
