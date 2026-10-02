@@ -1,14 +1,18 @@
 const { Client: ClientClass, GatewayIntentBits } = require("discord.js");
 
 /*
-const NewLimitedPing = "@everyone";
-const UptimePing = "@everyone";
-const DowntimePing = "@everyone";
+const NewItemPing = "<@&1555656321813061794>";
+const NewGamePing = "<@&1555656524884611112>";
+const NewLimitedPing = "<@&1555634098372870195>";
+const UptimePing = "<@&1555634154354515968>";
+const DowntimePing = "<@&1555645752586412062>";
 */
 
 const NewLimitedPing = "<@1370426338007060656>";
 const UptimePing = "<@1370426338007060656>";
 const DowntimePing = "<@1370426338007060656>";
+const NewItemPing = "<@1370426338007060656>";
+const NewGamePing = "<@1370426338007060656>";
 
 const PingCount = 5;
 
@@ -18,9 +22,11 @@ const RefreshTime = 3;
 const VortexUptimeChannelId = "1555632959464284292";
 const NewLimitedChannelId = "1555631510881833080";
 const NewItemChannelId = "1555651204103798894";
+const NewGamesChannelId = "1555655850587332781";
 
 let LimitedItems = [];
 let Items = [];
+let Games = [];
 
 let UptimePingTime = 0;
 let UptimeCount = 0;
@@ -48,7 +54,13 @@ async function SendDowntimeMessage(Channel, Response) {
 
 async function SendItemMessage(NewLimitedChannel, NewItemChannel, Item) {
   await (Item.limited ? NewLimitedChannel : NewItemChannel).send(
-    `${NewLimitedPing} New${Item.limited ? " Limited " : " "}item: ${Item.name}\nhttps://playvortex.io/catalog/${Item.id}`,
+    `${Item.limited ? NewLimitedPing : NewItemPing} New${Item.limited ? " Limited " : " "}item: ${Item.name}\nhttps://playvortex.io/catalog/${Item.id}`,
+  );
+}
+
+async function SendGameMessage(Channel, Game) {
+  await Channel.send(
+    `${NewGamePing} New game: ${Game.name}\nhttps://playvortex.io/games/${Game.id}`,
   );
 }
 
@@ -122,31 +134,67 @@ async function HandleItems(NewLimitedChannel, NewItemChannel, CatalogData) {
   }
 }
 
+async function HandleGames(Channel, GamesData) {
+  for (const Game of GamesData) {
+    const GameId = String(Game.id);
+
+    if (Games.includes(GameId)) {
+      continue;
+    }
+
+    console.log(`[Ktb] New game: ${Game.name} (${Game.id})`);
+
+    await SendGameMessage(Channel, Game);
+
+    Games.push(GameId);
+  }
+}
+
 async function CheckVortex(
   VortexUptimeChannel,
   NewLimitedChannel,
   NewItemChannel,
+  NewGamesChannel,
 ) {
   try {
-    const Response = await fetch("https://playvortex.io/api/catalog/init", {
+    const CatalogResponse = await fetch(
+      "https://playvortex.io/api/catalog/init",
+      {
+        headers: {
+          Cookie: "session_token=" + process.env.VORTEX_TOKEN,
+        },
+      },
+    );
+
+    console.log(`[Ktb] Vortex status: ${CatalogResponse.status}`);
+
+    if (CatalogResponse.status != 200) {
+      await HandleVortexDown(VortexUptimeChannel, CatalogResponse);
+      return;
+    }
+
+    await HandleVortexUp(VortexUptimeChannel, CatalogResponse);
+
+    const CatalogData = await CatalogResponse.json();
+    console.log(`[Ktb] Catalog items: ${CatalogData.items.length}`);
+
+    await HandleItems(NewLimitedChannel, NewItemChannel, CatalogData);
+
+    const GamesResponse = await fetch("https://playvortex.io/api/games", {
       headers: {
         Cookie: "session_token=" + process.env.VORTEX_TOKEN,
       },
     });
 
-    console.log(`[Ktb] Vortex status: ${Response.status}`);
-
-    if (Response.status != 200) {
-      await HandleVortexDown(VortexUptimeChannel, Response);
+    if (GamesResponse.status != 200) {
+      await HandleVortexDown(VortexUptimeChannel, GamesResponse);
       return;
     }
 
-    await HandleVortexUp(VortexUptimeChannel, Response);
+    const GamesData = await GamesResponse.json();
+    console.log(`[Ktb] Games: ${GamesData.length}`);
 
-    const CatalogData = await Response.json();
-    console.log(`[Ktb] Catalog items: ${CatalogData.items.length}`);
-
-    await HandleItems(NewLimitedChannel, NewItemChannel, CatalogData);
+    await HandleGames(NewGamesChannel, GamesData);
   } catch (Error) {
     UptimeCount = 0;
 
@@ -176,14 +224,19 @@ Client.once("clientReady", async () => {
 
   const NewItemChannel = await Client.channels.fetch(NewItemChannelId);
 
-  const Response = await fetch("https://playvortex.io/api/catalog/init", {
-    headers: {
-      Cookie: "session_token=" + process.env.VORTEX_TOKEN,
-    },
-  });
+  const NewGamesChannel = await Client.channels.fetch(NewGamesChannelId);
 
-  if (Response.status == 200) {
-    const CatalogData = await Response.json();
+  const CatalogResponse = await fetch(
+    "https://playvortex.io/api/catalog/init",
+    {
+      headers: {
+        Cookie: "session_token=" + process.env.VORTEX_TOKEN,
+      },
+    },
+  );
+
+  if (CatalogResponse.status == 200) {
+    const CatalogData = await CatalogResponse.json();
 
     for (const Item of CatalogData.items) {
       const ItemId = String(Item.id);
@@ -195,11 +248,32 @@ Client.once("clientReady", async () => {
       }
     }
   } else {
-    await HandleVortexDown(VortexUptimeChannel, Response);
+    await HandleVortexDown(VortexUptimeChannel, CatalogResponse);
+  }
+
+  const GamesResponse = await fetch("https://playvortex.io/api/games", {
+    headers: {
+      Cookie: "session_token=" + process.env.VORTEX_TOKEN,
+    },
+  });
+
+  if (GamesResponse.status == 200) {
+    const GamesData = await GamesResponse.json();
+
+    for (const Game of GamesData) {
+      Games.push(String(Game.id));
+    }
+  } else {
+    await HandleVortexDown(VortexUptimeChannel, GamesResponse);
   }
 
   setInterval(async () => {
-    await CheckVortex(VortexUptimeChannel, NewLimitedChannel, NewItemChannel);
+    await CheckVortex(
+      VortexUptimeChannel,
+      NewLimitedChannel,
+      NewItemChannel,
+      NewGamesChannel,
+    );
   }, RefreshTime * 1000);
 });
 
